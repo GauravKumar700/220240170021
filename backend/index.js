@@ -32,7 +32,6 @@ function validateURL(u) {
 }
 
 app.post('/shorten', async (req, res) => {
-    console.log(req.body)
     const { url: originalUrl, shortcode: custom, validityInMinutes } = req.body;
 
     if (!validateURL(originalUrl)) {
@@ -67,20 +66,6 @@ app.post('/shorten', async (req, res) => {
     Log('backend', 'info', 'shortener', 'Short URL created', { shortUrl });
 
     res.status(201).json({ shortUrl, expiresAt });
-});
-
-app.get('/:shortcode', async (req, res) => {
-    const doc = await Url.findOne({ shortcode: req.params.shortcode });
-    if (!doc) return res.status(404).json({ message: 'Not found' });
-
-    if (doc.expiresAt.getTime() <= Date.now()) {
-        return res.status(410).json({ message: 'Expired' });
-    }
-
-    doc.clicks++;
-    await doc.save();
-
-    res.redirect(doc.originalUrl);
 });
 
 app.listen(PORT, () => console.log(`Backend running on ${PORT}`));
