@@ -3,6 +3,7 @@ import { useState } from "react";
 export default function App() {
   const [url, setUrl] = useState("");
   const [short, setShort] = useState(null);
+  const [expiresAt, setExpiresAt] = useState(null);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -13,6 +14,7 @@ export default function App() {
     });
     const data = await res.json();
     setShort(data.shortUrl);
+    setExpiresAt(data.expiresAt)
   }
 
   return (
@@ -31,6 +33,8 @@ export default function App() {
       {short && (
         <p>
           Short URL: <a href={short}>{short}</a>
+          <br />
+          Expires At : {expiresAt}
         </p>
       )}
     </div>
