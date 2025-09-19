@@ -1,5 +1,5 @@
 # Ignore node_modules in backend and frontend 
-backend/node_modules/ 
-frontend/node_modules/ 
+backend-test-submission/node_modules/ 
+frontend-test-submission/node_modules/ 
 # Ignore any other node_modules just in case 
 **/node_modules/
