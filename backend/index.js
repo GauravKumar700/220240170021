@@ -1,49 +1,86 @@
-//importing all required dependancies/libraries
 require('dotenv').config();
 const express = require('express');
-const Log = require('./middleware/logger');
+const mongoose = require('mongoose');
+const Url = require('./models/Url');
+const { randomShortcode } = require('./utils/shortcode');
+// import logger
+const { requestLogger } = require('../loggingmiddleware/middleware');
+const Log = require('../loggingmiddleware');
+const cors = require('cors')
+
 const app = express();
-
 app.use(express.json());
+app.use(requestLogger);
+app.use(cors())
 
-// Request logger middleware (placed before routes)
-app.use((req, res, next) => {
-    Log('backend', 'info', 'handler', `Incoming ${req.method} ${req.originalUrl} from ${req.ip}`);
-    // log when response is finished (status code)
-    res.on('finish', () => {
-        Log('backend', 'info', 'handler', `Completed ${req.method} ${req.originalUrl} ${res.statusCode}`);
-    });
-    next();
-});
+const {
+    MONGO_URI,
+    BASE_URL,
+    DEFAULT_VALIDITY_MINUTES,
+    PORT = 3000
+} = process.env;
 
-// Example route — successful
-app.get('/ok', (req, res) => {
-    Log('backend', 'debug', 'handler', 'ok route hit');
-    res.json({ ok: true });
-});
+mongoose.connect(MONGO_URI)
+    .then(() => console.log('MongoDB connected'))
+    .catch(err => { console.error(err); process.exit(1); });
 
-// Example route — simulate DB error and demonstrate logging in service layer
-app.get('/simulate-db-error', async (req, res, next) => {
+function validateURL(u) {
     try {
-        // Example: a DB operation fails
-        throw new Error('Simulated DB connection failure');
-    } catch (err) {
-        // Domain-level logging for DB failures
-        Log('backend', 'fatal', 'db', err.message, { route: req.originalUrl });
-        // forward to error handler
-        next(err);
+        const url = new URL(u);
+        return ['http:', 'https:'].includes(url.protocol);
+    } catch { return false; }
+}
+
+app.post('/shorten', async (req, res) => {
+    console.log(req.body)
+    const { url: originalUrl, shortcode: custom, validityInMinutes } = req.body;
+
+    if (!validateURL(originalUrl)) {
+        return res.status(400).json({ message: 'Invalid URL' });
     }
+
+    let validity = parseInt(validityInMinutes, 10);
+    if (isNaN(validity) || validity <= 0) {
+        validity = parseInt(DEFAULT_VALIDITY_MINUTES, 10) || 30;
+    }
+    const expiresAt = new Date(Date.now() + validity * 60 * 1000);
+
+    let finalShortcode = null;
+    if (custom) {
+        const exists = await Url.findOne({ shortcode: custom });
+        if (!exists) {
+            finalShortcode = custom;
+        }
+    }
+    if (!finalShortcode) {
+        let candidate;
+        do {
+            candidate = randomShortcode();
+        } while (await Url.findOne({ shortcode: candidate }));
+        finalShortcode = candidate;
+    }
+
+    const doc = new Url({ originalUrl, shortcode: finalShortcode, expiresAt });
+    await doc.save();
+
+    const shortUrl = `${BASE_URL}/${finalShortcode}`;
+    Log('backend', 'info', 'shortener', 'Short URL created', { shortUrl });
+
+    res.status(201).json({ shortUrl, expiresAt });
 });
 
-// Error-handling middleware (must be after routes)
-app.use((err, req, res, next) => {
-    const level = (err.status && err.status < 500) ? 'error' : 'fatal';
-    Log('backend', level, 'handler', `${err.message} - ${req.method} ${req.originalUrl}`, { stack: err.stack });
-    res.status(err.status || 500).json({ error: err.message });
+app.get('/:shortcode', async (req, res) => {
+    const doc = await Url.findOne({ shortcode: req.params.shortcode });
+    if (!doc) return res.status(404).json({ message: 'Not found' });
+
+    if (doc.expiresAt.getTime() <= Date.now()) {
+        return res.status(410).json({ message: 'Expired' });
+    }
+
+    doc.clicks++;
+    await doc.save();
+
+    res.redirect(doc.originalUrl);
 });
 
-const port = process.env.PORT || 3000;
-app.listen(port, () => {
-    console.log(`Server listening on ${port}`);
-    Log('backend', 'info', 'handler', `Server started on port ${port}`);
-});
+app.listen(PORT, () => console.log(`Backend running on ${PORT}`));
